@@ -7,6 +7,7 @@ public class Cell : MonoBehaviour {
 	private int m_x;
 	private int m_y;
 	public BoardGenerator m_bg;
+	public bool isObstacle = false;
 
 	public Cell(int x, int y, BoardGenerator bg){
 		m_x = x;

@@ -1,7 +1,8 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-
+using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 
 public class BoardGenerator : MonoBehaviour {
 	private int x = 9;
@@ -10,42 +11,92 @@ public class BoardGenerator : MonoBehaviour {
 	private Transform[,] ballsMatrix;
 	private List<Position> availablePositions;
 	private List<Transform> destroyNodesList;
+	private List<Transform> randomNodes;
 	public Transform boardP;
 	public Transform ball;
+	public Camera cam;
+	public Text gameOverText;
+	public Text replaceText;
 	private Transform startPoint = null;
 	private Transform endPoint = null;
 	private List<Node> globalPath;
+	private List<Transform> randomDestroy;
 	private bool colorIndicator = false;
 	private bool ballIndicator = false;
 	private bool moveIndicator = false;
 	private bool destroyObjectsIndicator = false;
+	private bool sizeIndicator = true;
+	private bool callFirstTime = true;
+	private bool canReplace = true;
+	private bool gameOver = false;
+	private Vector3 smallSphereSize = new Vector3(0.5f, 0.5f, 0.5f);
+	private Vector3 sphereSize = new Vector3(0.8f, 0.8f, 0.8f);
 	public float speed = 6f;
-	private int score = 0;
+	public int score = 0;
+	private int currIndx = 0;
 	//public Material material;
 	// Use this for initialization
 	void Start () {
+		gameOverText.gameObject.SetActive(false);
+		replaceText.gameObject.SetActive(false);
 		generateBoard();
+		addBalls();
+		callFirstTime = false;
 		addBalls();
 	}
 
 	private int tmp = 1;
 	private int m_x;
 	private int m_y;
-	private int currIndx = 0;
 	private Transform upStart;
 	void Update(){
-		if (ballIndicator){
+
+		if (gameOver){
+			gameOverText.gameObject.SetActive(true);
+			return;
+		}
+		if (ballIndicator && startPoint != null){
 			Vector3 t = startPoint.localScale;
 			if (t.y > 2.5)
 				tmp = -1;
 			if (tmp == -1 && t.y < 0)
 				tmp = 1;
-			t.y += Time.deltaTime * tmp;
+			t.y += Time.deltaTime*tmp * speed ;
 			startPoint.localScale = t;
 		}
 
+		moveBallsToDestination();
+
+		if (destroyObjectsIndicator){
+			destroyAllSelectedObjects();
+		}
+
+		operateRandomBalls();
+
+		
+	}
+
+
+	public void Restart(){
+		SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+	}
+
+	public void operateRandomBalls(){
+		if (!sizeIndicator){
+			foreach(Transform t in randomNodes){
+				t.localScale = smallSphereSize;
+			}
+		}
+		if (sizeIndicator){
+			foreach(Transform t in randomNodes){
+				t.localScale = sphereSize;
+				if (availablePositions.Count == 0)
+					gameOver = true;
+			}
+		}
+	}
+	public void moveBallsToDestination(){
 		if(moveIndicator){
-			
 			if(currIndx == 0){
 				upStart = ballsMatrix[globalPath[0].getX(), globalPath[0].getY()];
 				currIndx++;
@@ -55,6 +106,7 @@ public class BoardGenerator : MonoBehaviour {
 			else if (currIndx == globalPath.Count){
 				moveIndicator = false;
 				currIndx = 0;
+				sizeIndicator = true;
 			}
 			else{
 				Transform currPoint = board[globalPath[currIndx].getX(), globalPath[currIndx].getY()];
@@ -65,11 +117,7 @@ public class BoardGenerator : MonoBehaviour {
 			}
 
 		}
-		 if (destroyObjectsIndicator){
-			destroyAllSelectedObjects();
-		}
 	}
-
 	public void generateBoard(){
 		board = new Transform[x, y];
 		ballsMatrix = new Transform[x, y];
@@ -88,15 +136,40 @@ public class BoardGenerator : MonoBehaviour {
 			}
 			
 		}
+
+		makeObstacle();
 	}
+
+	public void makeObstacle(){
+		int numOfObstacles = Random.Range(3, 9);
+		for (int i = 0; i < numOfObstacles; i++){
+			int ind = Random.Range(0, availablePositions.Count);
+			Position p = availablePositions[ind];
+			board[p.getX(), p.getY()].GetComponent<Cell>().isObstacle = true;
+			board[p.getX(), p.getY()].gameObject.SetActive(false);
+			deleteFromList(ind);
+
+		}
+	}
+
 
 	public Vector3 getPosition(int i, int j){
 		return new Vector3(-x*1.0f / 2 + 0.5f + i, 0,  -y*1.0f / 2 + 0.5f + j);
 	}
+
 	
-	public void addBalls(){
+	public IEnumerator addAll(){
+
+		while(destroyObjectsIndicator == true)
+			yield return null;
+
 		for (int i = 0; i < 3; i++){
-			int color = Random.Range(0, 5);
+			if (availablePositions.Count == 0){
+				sizeIndicator = true;
+				yield break;
+			}
+
+			int color = Random.Range(0, 4);
 			int indx = Random.Range(0, availablePositions.Count);
 			Position p = availablePositions[indx];
 			Vector3 position = getPosition(p.getX(), p.getY());
@@ -105,20 +178,43 @@ public class BoardGenerator : MonoBehaviour {
 			newBall.GetComponent<Ball>().m_bg = this;
 			newBall.GetComponent<Ball>().setIndexes(p.getX(), p.getY());
 			Color newBallColor = newBall.GetComponent<Ball>().getColor();
-			/*Material newMaterial = new Material(material);
-			newMaterial.color = newBallColor;
-			newBall.material = newMaterial;*/
 			newBall.GetComponent<Renderer>().material.color = newBallColor;
 			ballsMatrix[p.getX(), p.getY()] = newBall;
-			
+			bool res = checkLines(p, true);
+			if(res){
+				ballsMatrix[p.getX(), p.getY()] = null;
+				Destroy(newBall.gameObject);
+				i--;
+				continue;
+			}
+			randomNodes.Add(newBall);
 			deleteFromList(indx);
 		}
+		if (availablePositions.Count == 0){
+				sizeIndicator = true;
+				yield break;
+		}
+
+	}
+	
+	public void addBalls(){
+		randomNodes = new List<Transform>();
+		
+		if(callFirstTime){
+			callFirstTime = false;
+			sizeIndicator = true;
+		}
+		else
+			sizeIndicator = false;
+
+		StartCoroutine(addAll());
+		
 
 	}
 
 	public void destroyAllSelectedObjects(){
 		foreach(Transform t in destroyNodesList){
-				t.Translate(0, -Time.deltaTime * (speed - 2), 0);
+				t.Translate(0, -Time.deltaTime * (speed - 3f), 0);
 				if (t.position.y < - 1){
 					Position position = new Position(t.GetComponent<Ball>().getX(), t.GetComponent<Ball>().getY());
 					Destroy(t.gameObject);
@@ -161,11 +257,21 @@ public class BoardGenerator : MonoBehaviour {
 	}
 
 	public void setStartPoint(int i , int j){
+		replaceText.gameObject.SetActive(false);
 		if(startPoint != null){
 			Vector3 vec = startPoint.localScale;
 			vec.y = 0.8f;
 			startPoint.localScale = vec;
 		}
+		foreach(Transform t in randomNodes){
+			if (t.GetComponent<Ball>().getX() == i && t.GetComponent<Ball>().getY() == j){
+				if(startPoint != null)
+					startPoint = null;
+				return;
+				
+			}
+		}
+		
 		startPoint = ballsMatrix[i, j];
 		ballIndicator = true;
 		if (colorIndicator){
@@ -180,6 +286,11 @@ public class BoardGenerator : MonoBehaviour {
 		if (startPoint == null)
 			return;
 		endPoint = board[i, j];
+		if (endPoint.GetComponent<Cell>().isObstacle || ballsMatrix[i, j] != null){
+			startPoint = null;
+			endPoint = null;
+			return;
+		}
 		Vector3 vec = startPoint.localScale;
 		vec.y = 0.8f;
 		startPoint.localScale = vec;
@@ -211,7 +322,7 @@ public class BoardGenerator : MonoBehaviour {
 		
 		
 	}
-	/*this coroutine allows to pause wait until ball come to right place */
+	/*this coroutine allows to  wait until ball come to right place */
 	public IEnumerator checkBool (Position startPosition, Position endPosition){
 		while(moveIndicator)
 			yield return null;
@@ -253,7 +364,7 @@ public class BoardGenerator : MonoBehaviour {
 			foreach(Node neighbour in neighbours){
 				int posX = neighbour.getX();
 				int posY = neighbour.getY();
-				if (ballsMatrix[posX, posY] != null || closedList.Contains(neighbour))
+				if (ballsMatrix[posX, posY] != null || closedList.Contains(neighbour) || board[posX, posY].GetComponent<Cell>().isObstacle)
 					continue;
 				int newDistance = current.m_gCost + distance(current, neighbour);
 				if (newDistance < neighbour.m_gCost || !openList.contains(neighbour)){
@@ -285,34 +396,38 @@ public class BoardGenerator : MonoBehaviour {
 	}
 
 
-	//for heuristics i will use octile distance
+	//for heuristics i will use manhattan distance
 
 	public int distance(Node start, Node end){
-		int D = 10;
-    	int D2 = 14;
-    	int dx = System.Math.Abs(start.getX() - end.getX());
-    	int dy = System.Math.Abs(start.getY() - end.getY());
-    	return D * (dx + dy) + (D2 - 2 * D) * System.Math.Min(dx, dy);
+		return System.Math.Abs(start.getX() - end.getX()) + System.Math.Abs(start.getY() - end.getY());
 	}
 
 	public List<Node> getNeighbours(Node node, Node[,] matrix){
 		List<Node> result = new List<Node>();
-		for (int i = -1; i <=1; i++){
-			for(int j = -1; j <=1; j++){
-				if (i == 0 && j == 0)
-					continue;
-				int neighX = node.getX() + i;
-				int neighY = node.getY() + j;
-				if (neighX >= 0 && neighX < x && neighY>=0 && neighY < y)
-					result.Add(matrix[neighX, neighY]);
-			}
-		}
+		
+		int neighX = node.getX() + 1;
+		int neighY = node.getY();
+
+		if (neighX >= 0 && neighX < x && neighY>=0 && neighY < y)
+				result.Add(matrix[neighX, neighY]);
+
+		neighX -= 2;
+		if (neighX >= 0 && neighX < x && neighY>=0 && neighY < y)
+				result.Add(matrix[neighX, neighY]);
+		neighY += 1;
+		neighX++;
+		if(neighX >= 0 && neighX < x && neighY>=0 && neighY < y)
+				result.Add(matrix[neighX, neighY]);
+		neighY -= 2;
+		if(neighX >= 0 && neighX < x && neighY>=0 && neighY < y)
+				result.Add(matrix[neighX, neighY]);
+
 		return result;
 	}
 
 	/*function checks if there is 5 or more balls in line and update score */
 
-	public void checkLines(Position pos){
+	public bool checkLines(Position pos, bool random = false){
 		destroyNodesList = new List<Transform>();
 		int horizontalResult = checkHorizontal(pos);
 		int verticalResult = checkVertical(pos);
@@ -320,26 +435,33 @@ public class BoardGenerator : MonoBehaviour {
 		int diagonalResult2 = checkDiagonal2(pos);
 	
 		if (horizontalResult > 4){
-			score += 5 + (horizontalResult - 5) * 2;
+			if(!random)
+				score += 5 + (horizontalResult - 5) * 2;
 		}
 
 		if (verticalResult > 4){
-			score +=  5 + (verticalResult - 5) * 2;
+			if(!random)
+				score +=  5 + (verticalResult - 5) * 2;
 		}
 
 		if (diagonalResult1 > 4){
-			 score += 5 + (diagonalResult1 - 5) * 2;
+			if(!random)
+			 	score += 5 + (diagonalResult1 - 5) * 2;
 		}
 
 		if (diagonalResult2 > 4){
-			 score += 5 + (diagonalResult2 - 5) * 2;
+			if(!random)
+			 	score += 5 + (diagonalResult2 - 5) * 2;
 		}
-
-
+		if (destroyNodesList.Count != 0 && random)
+			return true;
 		if (destroyNodesList.Count != 0){
 			destroyNodesList.Add(ballsMatrix[pos.getX(), pos.getY()]);
 			destroyObjectsIndicator = true;
+			return true;
 		}
+		return false;
+		
 	}
 
 
@@ -350,7 +472,7 @@ public class BoardGenerator : MonoBehaviour {
 		//first going left 
 		int i = posX - 1;
 		while (i >= 0){
-			if (ballsMatrix[i, posY] != null){
+			if (ballsMatrix[i, posY] != null && ballsMatrix[i, posY].localScale == sphereSize){
 				if (ballsMatrix[i, posY].GetComponent<Ball>().getColor() == ballsMatrix[posX, posY].GetComponent<Ball>().getColor()){
 					currList.Add(ballsMatrix[i, posY]);
 					
@@ -369,7 +491,7 @@ public class BoardGenerator : MonoBehaviour {
 
 		i = posX + 1;
 		while (i < x){
-			if (ballsMatrix[i, posY] != null){
+			if (ballsMatrix[i, posY] != null && ballsMatrix[i, posY].localScale == sphereSize){
 				if (ballsMatrix[i, posY].GetComponent<Ball>().getColor() == ballsMatrix[posX, posY].GetComponent<Ball>().getColor()){
 					currList.Add(ballsMatrix[i, posY]);
 					
@@ -383,8 +505,9 @@ public class BoardGenerator : MonoBehaviour {
 		}			
 		
 		if (currList.Count >= 4){
-			foreach(Transform node in currList)
+			foreach(Transform node in currList){
 				destroyNodesList.Add(node);
+			}
 		}
 		return currList.Count + 1;
 
@@ -441,7 +564,7 @@ public class BoardGenerator : MonoBehaviour {
 		int j = posY + 1;
 
 		while (i >= 0 && j < y){
-			if (ballsMatrix[i, j] != null){
+			if (ballsMatrix[i, j] != null ){
 				if (ballsMatrix[i, j].GetComponent<Ball>().getColor() == ballsMatrix[posX, posY].GetComponent<Ball>().getColor()){
 					currList.Add(ballsMatrix[i,  j]);
 				}
@@ -458,7 +581,7 @@ public class BoardGenerator : MonoBehaviour {
 		j = posY - 1;
 
 		while (i < x && j >= 0){
-			if (ballsMatrix[i, j] != null){
+			if (ballsMatrix[i, j] != null ){
 				if (ballsMatrix[i, j].GetComponent<Ball>().getColor() == ballsMatrix[posX, posY].GetComponent<Ball>().getColor()){
 					currList.Add(ballsMatrix[i,  j]);
 				}
@@ -490,7 +613,7 @@ public class BoardGenerator : MonoBehaviour {
 		int j = posY - 1;
 
 		while (i >= 0 && j >= 0){
-			if (ballsMatrix[i, j] != null){
+			if (ballsMatrix[i, j] != null ){
 				if (ballsMatrix[i, j].GetComponent<Ball>().getColor() == ballsMatrix[posX, posY].GetComponent<Ball>().getColor()){
 						currList.Add(ballsMatrix[i,  j]);
 				}
@@ -507,7 +630,7 @@ public class BoardGenerator : MonoBehaviour {
 		j = posY + 1;
 
 		while (i < x && j < y){
-			if (ballsMatrix[i, j] != null){
+			if (ballsMatrix[i, j] != null ){
 				if (ballsMatrix[i, j].GetComponent<Ball>().getColor() == ballsMatrix[posX, posY].GetComponent<Ball>().getColor()){
 					currList.Add(ballsMatrix[i,  j]);
 				}
@@ -528,7 +651,24 @@ public class BoardGenerator : MonoBehaviour {
 		return currList.Count + 1;
 	}
 
-
+	public void replaceBalls(){
+		if(moveIndicator || destroyObjectsIndicator)
+			return;
+		if(!canReplace){
+			replaceText.gameObject.SetActive(true);
+			return;
+		}
+		canReplace = false;
+		foreach(Transform t in randomNodes){
+			int i = t.GetComponent<Ball>().getX();
+			int j = t.GetComponent<Ball>().getY();
+			ballsMatrix[i, j] = null;
+			Destroy(t.gameObject);
+			availablePositions.Add(new Position(i, j));
+		}
+		addBalls();
+		
+	}
 
 
 	public class Node{
@@ -551,6 +691,8 @@ public class BoardGenerator : MonoBehaviour {
 			return m_p.getY();
 		}
 	}
+
+
 
 	//min heap structure
 	public class Heap{

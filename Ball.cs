@@ -26,10 +26,9 @@ public class Ball : MonoBehaviour {
             m_color = Color.blue;
         else if (x == 2)
             m_color = Color.red;
-        else if (x == 3)
+        else 
             m_color = Color.green;
-        else
-            m_color = Color.yellow;
+        
     }
     public void setColor(Color c){
         m_color = c;
